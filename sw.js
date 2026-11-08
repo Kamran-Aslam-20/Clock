@@ -1,4 +1,4 @@
-const CACHE_NAME = "flip-clock-v1";
+const CACHE_NAME = "flip-clock-v2";
 const APP_FILES = [
   "./",
   "./index.html",
