@@ -130,7 +130,19 @@
     .day { font-size: clamp(22px, 4vw, 34px); }
     .date { font-size: clamp(15px, 2.4vw, 19px); }
   }
-
+  
+  @media (orientation: landscape) and (max-height: 500px) {
+    body { gap: 3vh; padding: 2vh 3vw; }
+    .clock { gap: 1.5vh; }
+    .group { gap: 1vh; }
+    .colon { font-size: 22vh; }
+    .ampm { font-size: 7vh; margin-right: 1vh; }
+    .tile { width: 33vh; height: 60vh; border-radius: 6vh; }
+    .digit { font-size: 56vh; }
+    .day { font-size: 9vh; }
+    .date { font-size: 5vh; }
+  }
+  
   @media (prefers-reduced-motion: reduce) {
     .tile.flip .digit { animation: none; }
   }
