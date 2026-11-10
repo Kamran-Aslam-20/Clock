@@ -1,0 +1,1312 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#000000">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>Flip Clock</title>
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="icon-192.png" type="image/png">
+<link rel="apple-touch-icon" href="icon-192.png">
+<style>
+  :root {
+    --bg: #000;
+    --tile-top: #1c1c1f;
+    --tile-bottom: #0c0c0e;
+    --numeral: #e8e8ea;
+    --muted: #7a7a82;
+    --condensed: "Arial Black", "Roboto", "Helvetica Neue", Arial, sans-serif;
+    --th: min(21vw, 230px);          /* tile height, everything scales from this */
+    --r: calc(var(--th) * 0.12);     /* tile corner radius */
+    color-scheme: dark;
+    padding-top: env(safe-area-inset-top, 0px);
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; }
+
+  body {
+    background: var(--bg);
+    color: var(--numeral);
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: clamp(16px, 4vh, 36px);
+    padding: 16px 10px;
+    overflow: hidden;
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+    user-select: none;
+  }
+
+  /* Slowly drifting ambient light behind the clock */
+  body::before {
+    content: "";
+    position: fixed;
+    inset: -20%;
+    z-index: -1;
+    background:
+      radial-gradient(circle at 30% 25%, rgba(255, 255, 255, 0.07), transparent 42%),
+      radial-gradient(circle at 72% 78%, rgba(140, 160, 255, 0.06), transparent 45%);
+    animation: drift 22s ease-in-out infinite alternate;
+  }
+
+  body::after {
+    content: "";
+    position: fixed;
+    inset: 0;
+    z-index: 1;
+    pointer-events: none;
+    background: radial-gradient(ellipse at center, transparent 55%, rgba(0, 0, 0, 0.55) 100%);
+  }
+
+  @keyframes drift {
+    0%   { transform: translate(-3%, -2%) scale(1); }
+    100% { transform: translate(3%, 2%) scale(1.06); }
+  }
+
+  .clock {
+    position: relative;
+    display: flex;
+    align-items: center;
+    gap: calc(var(--th) * 0.07);
+  }
+
+  .group { display: flex; gap: calc(var(--th) * 0.045); }
+
+  .colon {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    gap: calc(var(--th) * 0.2);
+    animation: fadeIn 1s ease 0.4s both;
+  }
+  .colon span {
+    display: block;
+    width: calc(var(--th) * 0.09);
+    height: calc(var(--th) * 0.09);
+    border-radius: 50%;
+    background: var(--numeral);
+    transition: background 0.6s ease;
+  }
+
+  /* AM/PM hangs off the left edge so the digits stay centred on screen */
+  .ampm {
+    position: absolute;
+    right: 100%;
+    top: 50%;
+    transform: translateY(-50%);
+    margin-right: 2vw;
+    white-space: nowrap;
+    font-family: var(--condensed);
+    font-weight: 700;
+    font-size: calc(var(--th) * 0.13);
+    letter-spacing: 0.04em;
+    line-height: 1;
+    color: var(--numeral);
+    opacity: 0.8;
+    transition: color 0.6s ease;
+  }
+
+  /* ---------- Flip tile ---------- */
+  .tile {
+    position: relative;
+    width: var(--th);
+    height: var(--th);
+    border-radius: var(--r);
+    perspective: 800px;
+    box-shadow: 0 12px 24px rgba(0, 0, 0, 0.85), 0 2px 4px rgba(0, 0, 0, 0.6), inset 0 1px 1px rgba(255, 255, 255, 0.07), inset 0 -4px 8px rgba(0, 0, 0, 0.55);
+    transition: box-shadow 0.4s ease;
+    animation: dropIn 0.9s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+    animation-delay: calc(var(--i, 0) * 110ms);
+  }
+
+  /* Subtle glass sheen and bottom shadow for depth */
+  .tile::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    border-radius: var(--r);
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.07) 0%, transparent 42%, transparent 58%, rgba(0, 0, 0, 0.35) 100%);
+    pointer-events: none;
+    z-index: 4;
+  }
+
+  /* Gentle pulse when the minute changes */
+  .clock.bump { animation: bump 0.7s ease; }
+  @keyframes bump {
+    0%   { transform: scale(1); }
+    35%  { transform: scale(1.025); }
+    100% { transform: scale(1); }
+  }
+
+  .tile.flipping {
+    box-shadow: 0 10px 26px rgba(0, 0, 0, 0.8), 0 0 36px rgba(255, 255, 255, 0.07);
+  }
+
+  .half {
+    position: absolute;
+    left: 0;
+    right: 0;
+    height: 50%;
+    overflow: hidden;
+  }
+  .half.top    { top: 0;   border-radius: var(--r) var(--r) 0 0;  background: var(--tile-top); }
+  .half.bottom { top: 50%; border-radius: 0 0 var(--r) var(--r);   background: var(--tile-bottom); }
+
+  .half.top::after {
+    content: "";
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    height: 18%;
+    background: linear-gradient(to top, rgba(0, 0, 0, 0.45), transparent);
+    pointer-events: none;
+    z-index: 2;
+  }
+
+  .num {
+    position: absolute;
+    left: 0;
+    right: 0;
+    height: var(--th);
+    line-height: var(--th);
+    text-align: center;
+    font-family: var(--condensed);
+    font-weight: 700;
+    font-size: calc(var(--th) * 0.82);
+    -webkit-text-stroke: calc(var(--th) * 0.014) currentColor;
+    text-shadow: 0 calc(var(--th) * 0.01) calc(var(--th) * 0.02) rgba(0, 0, 0, 0.6);
+    font-variant-numeric: tabular-nums;
+    color: var(--numeral);
+    transition: color 0.6s ease;
+  }
+  .half.top .num,
+  .flap-top .num { top: 0; }
+  .half.bottom .num,
+  .flap-bottom .num { top: calc(var(--th) * -0.5); }
+
+  /* The two flaps only exist during a flip */
+  .flap {
+    position: absolute;
+    left: 0;
+    right: 0;
+    height: 50%;
+    overflow: hidden;
+    display: none;
+    backface-visibility: hidden;
+    z-index: 3;
+  }
+  .flap::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background: #000;
+    opacity: 0;
+  }
+  .flap-top    { top: 0;   background: var(--tile-top);    border-radius: var(--r) var(--r) 0 0; transform-origin: 50% 100%; }
+  .flap-bottom { top: 50%; background: var(--tile-bottom); border-radius: 0 0 var(--r) var(--r); transform-origin: 50% 0; transform: rotateX(90deg); }
+
+  .tile.flipping .flap { display: block; }
+
+  .tile.flipping .flap-top {
+    animation: foldTop 0.32s cubic-bezier(0.5, 0, 0.9, 0.6) forwards;
+  }
+  .tile.flipping .flap-top::after {
+    animation: shadeIn 0.32s linear forwards;
+  }
+  .tile.flipping .flap-bottom {
+    animation: foldBottom 0.42s cubic-bezier(0.1, 0.7, 0.3, 1) 0.3s both;
+  }
+  .tile.flipping .flap-bottom::after {
+    animation: shadeOut 0.42s linear 0.3s both;
+  }
+
+  @keyframes foldTop {
+    from { transform: rotateX(0deg); }
+    to   { transform: rotateX(-90deg); }
+  }
+  @keyframes foldBottom {
+    from { transform: rotateX(90deg); }
+    to   { transform: rotateX(0deg); }
+  }
+  @keyframes shadeIn  { to   { opacity: 0.5; } }
+  @keyframes shadeOut { from { opacity: 0.5; } to { opacity: 0; } }
+
+  /* Centre hinge */
+  .hinge {
+    position: absolute;
+    left: 0;
+    right: 0;
+    top: 50%;
+    height: max(2px, calc(var(--th) * 0.012));
+    background: linear-gradient(180deg, #050506 0%, #3a3a40 45%, #0a0a0c 100%);
+    box-shadow: 0 1px 0 rgba(255, 255, 255, 0.06), 0 0 6px rgba(0, 0, 0, 0.9);
+    transform: translateY(-50%);
+    z-index: 5;
+  }
+
+  /* Two side bolts per tile, like the hinge pins on a real flip clock */
+  .hinge::before,
+  .hinge::after {
+    content: "";
+    position: absolute;
+    top: 50%;
+    width: calc(var(--th) * 0.085);
+    height: calc(var(--th) * 0.085);
+    transform: translateY(-50%);
+    border-radius: 50%;
+    background: radial-gradient(circle at 35% 30%, #8a8a92 0%, #3a3a41 45%, #0b0b0d 100%);
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.8);
+  }
+  .hinge::before { left: calc(var(--th) * 0.035); }
+  .hinge::after  { right: calc(var(--th) * 0.035); }
+
+  @keyframes dropIn {
+    from { opacity: 0; transform: translateY(-28px) rotateX(-50deg); }
+    to   { opacity: 1; transform: translateY(0) rotateX(0deg); }
+  }
+
+  @keyframes fadeIn {
+    from { opacity: 0; }
+    to   { opacity: 0.85; }
+  }
+
+  .mins { position: relative; display: flex; align-items: center; }
+
+  /* Seconds sit under the ones digit of the minutes, left-aligned with it */
+  .secs-wrap {
+    position: absolute;
+    left: 100%;
+    top: 50%;
+    transform: translateY(-50%);
+    margin-left: 2vw;
+    white-space: nowrap;
+  }
+  .secs {
+    display: flex;
+    font-size: calc(var(--th) * 0.13);
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+    line-height: 1;
+    color: var(--numeral);
+    opacity: 0.75;
+    transition: color 0.6s ease;
+  }
+
+  /* Date and day */
+  .info {
+    text-align: center;
+    display: flex;
+    flex-direction: column;
+    gap: calc(var(--th) * 0.04);
+    animation: fadeIn 1s ease 0.8s both;
+  }
+
+  .day {
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    font-weight: 600;
+    font-size: clamp(18px, calc(var(--th) * 0.2), 40px);
+    letter-spacing: 0.01em;
+    color: var(--numeral);
+    transition: color 0.6s ease;
+  }
+
+  .date {
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    font-weight: 400;
+    font-size: clamp(13px, calc(var(--th) * 0.13), 28px);
+    letter-spacing: 0.03em;
+    color: var(--muted);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .swap { animation: swapIn 0.6s ease both; }
+  @keyframes swapIn {
+    from { opacity: 0; transform: translateY(8px); filter: blur(3px); }
+    to   { opacity: 1; transform: translateY(0); filter: blur(0); }
+  }
+
+  /* ---------- Views and stopwatch ---------- */
+  [hidden] { display: none !important; }
+
+  .view {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: clamp(16px, 4vh, 36px);
+    position: relative;
+    z-index: 2;
+  }
+
+  .pill, .sw-btn {
+    font: inherit;
+    cursor: pointer;
+    color: var(--numeral);
+    border-radius: 999px;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .pill {
+    background: none;
+    border: 1px solid #2a2a2f;
+    color: var(--muted);
+    font-size: 15px;
+    padding: 10px 22px;
+    margin-top: 8px;
+  }
+  .sw-btn {
+    background: #151518;
+    border: 1px solid #2a2a2f;
+    font-size: 17px;
+    font-weight: 600;
+    padding: 14px 28px;
+    min-width: 110px;
+  }
+  .pill:focus-visible, .sw-btn:focus-visible { outline: 2px solid var(--numeral); outline-offset: 3px; }
+
+  .sw-time {
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    font-weight: 600;
+    font-size: clamp(44px, 15vw, 130px);
+    font-variant-numeric: tabular-nums;
+    letter-spacing: -0.01em;
+    color: var(--numeral);
+    text-shadow: 0 3px 8px rgba(0, 0, 0, 0.6);
+    transition: color 0.6s ease;
+  }
+  .sw-controls { display: flex; gap: 12px; flex-wrap: wrap; justify-content: center; }
+  .pill-row { display: flex; gap: 10px; margin-top: 8px; }
+  .time-input {
+    font: inherit;
+    font-size: 24px;
+    color: var(--numeral);
+    background: #151518;
+    border: 1px solid #2a2a2f;
+    border-radius: 14px;
+    padding: 10px 16px;
+    color-scheme: dark;
+  }
+  .sw-btn.on { border-color: var(--numeral); }
+  .hint { font-size: 14px; color: var(--muted); text-align: center; max-width: 80vw; }
+  .ringing {
+    position: fixed;
+    inset: 0;
+    z-index: 20;
+    background: #000;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 28px;
+  }
+  .ringing .sw-time { animation: pulseDone 0.8s ease-in-out infinite alternate; }
+  .pill-row .pill { margin-top: 0; }
+  .presets { display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; }
+  .preset {
+    font: inherit;
+    font-size: 15px;
+    background: none;
+    border: 1px solid #2a2a2f;
+    color: var(--muted);
+    border-radius: 999px;
+    padding: 8px 16px;
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .preset.active { color: var(--numeral); border-color: var(--numeral); }
+  .preset:focus-visible { outline: 2px solid var(--numeral); outline-offset: 3px; }
+  .sw-time.done { animation: pulseDone 0.6s ease-in-out infinite alternate; }
+  @keyframes pulseDone { to { opacity: 0.25; } }
+  .laps {
+    list-style: none;
+    width: min(92vw, 360px);
+    max-height: 28vh;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+  }
+  .laps li {
+    display: flex;
+    justify-content: space-between;
+    padding: 9px 4px;
+    border-bottom: 1px solid #1f1f23;
+    font-size: 15px;
+    font-variant-numeric: tabular-nums;
+    color: var(--numeral);
+  }
+  .laps li span:last-child { color: var(--muted); }
+
+  /* Up/down setters for timer and alarm */
+  .setter { display: flex; align-items: center; gap: 14px; }
+  .col { display: flex; flex-direction: column; align-items: center; gap: 8px; }
+  .val {
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    font-weight: 600;
+    font-size: clamp(40px, 12vw, 96px);
+    font-variant-numeric: tabular-nums;
+    line-height: 1;
+    min-width: 1.6em;
+    text-align: center;
+    color: var(--numeral);
+  }
+  .sep { font-size: clamp(40px, 12vw, 96px); font-weight: 600; line-height: 1; color: var(--numeral); padding-bottom: 6px; }
+  .step {
+    font: inherit;
+    width: 56px;
+    height: 40px;
+    border-radius: 14px;
+    background: #151518;
+    border: 1px solid #2a2a2f;
+    color: var(--numeral);
+    font-size: 16px;
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .step:disabled { opacity: 0.3; cursor: default; }
+  .step:focus-visible { outline: 2px solid var(--numeral); outline-offset: 3px; }
+  .ampm-btn { margin-top: 0; padding: 12px 16px; color: var(--numeral); border-color: var(--numeral); }
+
+  /* ---------- Visual pass ---------- */
+  #alTime { display: none; }
+  .val {
+    transition: transform 0.15s ease, color 0.3s ease;
+    touch-action: none;
+    cursor: ns-resize;
+    user-select: none;
+  }
+  .val.dragging { transform: scale(1.08); }
+  body { padding-bottom: calc(118px + env(safe-area-inset-bottom, 0px)); }
+
+  .tabbar {
+    position: fixed;
+    left: 50%;
+    bottom: calc(14px + env(safe-area-inset-bottom, 0px));
+    transform: translateX(-50%);
+    z-index: 5;
+    display: flex;
+    gap: 4px;
+    padding: 6px;
+    border-radius: 26px;
+    background: rgba(24, 24, 28, 0.72);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    box-shadow: 0 14px 40px rgba(0, 0, 0, 0.6);
+    -webkit-backdrop-filter: blur(18px);
+    backdrop-filter: blur(18px);
+  }
+  .tab {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
+    min-width: 60px;
+    padding: 8px 10px;
+    border: 0;
+    border-radius: 20px;
+    background: none;
+    color: var(--muted);
+    font: 500 11px system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    cursor: pointer;
+    transition: color 0.3s ease, background 0.3s ease;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .tab svg {
+    width: 22px;
+    height: 22px;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 1.9;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+  .tab.active { color: var(--numeral); background: rgba(255, 255, 255, 0.09); }
+  .tab:focus-visible { outline: 2px solid var(--numeral); outline-offset: 2px; }
+
+  .pill-row, #swBack, #tmBack { display: none !important; }
+  .tabbar { transition: opacity 0.8s ease, transform 0.8s ease; }
+  body.idle .tabbar {
+    opacity: 0;
+    transform: translate(-50%, 16px);
+    pointer-events: none;
+  }
+
+  .sw-btn {
+    min-width: 104px;
+    height: 52px;
+    padding: 0 18px;
+    border-radius: 16px;
+    background: linear-gradient(180deg, #1f1f24, #141417);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    box-shadow: 0 6px 16px rgba(0, 0, 0, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.05);
+    transition: transform 0.15s ease;
+  }
+  .sw-btn:active { transform: scale(0.97); }
+  .sw-btn.on { border-color: var(--numeral); }
+
+  .preset {
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    transition: color 0.3s ease, border-color 0.3s ease, background 0.3s ease;
+  }
+  .preset.active { background: rgba(255, 255, 255, 0.07); }
+
+  .laps li { padding: 12px 6px; border-bottom: 1px solid rgba(255, 255, 255, 0.06); }
+
+  .step {
+    height: 44px;
+    width: 60px;
+    background: linear-gradient(180deg, #1f1f24, #141417);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+  }
+  .step:active { transform: scale(0.96); }
+
+  .hint { letter-spacing: 0.01em; }
+
+  /* Battery */
+  .battery {
+    position: fixed;
+    top: calc(14px + env(safe-area-inset-top, 0px));
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 4;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    color: var(--muted);
+    font: 500 13px system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
+  .bat { width: 38px; height: 19px; }
+  .bat .shell { fill: none; stroke: currentColor; stroke-width: 1.6; }
+  .bat .cap { fill: currentColor; }
+  .bat .level { fill: var(--numeral); transition: fill 0.4s ease; }
+  .bat .bolt { fill: #fff; opacity: 0; }
+  .battery.low .bat .level { fill: #ff6b6b; }
+  .battery.charging .bat .level { animation: charging 3.2s ease-in-out infinite; }
+  .battery.charging .bat .bolt { opacity: 1; animation: boltPulse 3.2s ease-in-out infinite; }
+  @keyframes charging {
+    0%, 100% { opacity: 0.7; }
+    50% { opacity: 1; }
+  }
+  @keyframes boltPulse {
+    0%, 100% { transform: scale(1); opacity: 0.8; }
+    50% { transform: scale(1.04); opacity: 1; }
+  }
+
+
+  /* 3D drum for the timer: a small window with numbers turning inside it */
+  .drum {
+    position: relative;
+    width: 2.2em;
+    height: 2.5em;
+    margin: 0 auto;
+    overflow: hidden;
+    perspective: 300px;
+    font-size: clamp(30px, 8vw, 60px);
+    touch-action: none;
+    cursor: ns-resize;
+    user-select: none;
+    -webkit-mask-image: linear-gradient(to bottom, transparent 0%, #000 30%, #000 70%, transparent 100%);
+    mask-image: linear-gradient(to bottom, transparent 0%, #000 30%, #000 70%, transparent 100%);
+  }
+  .slot {
+    position: absolute;
+    left: 0;
+    right: 0;
+    top: 0.75em;
+    height: 1em;
+    line-height: 1;
+    text-align: center;
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+    color: var(--numeral);
+    backface-visibility: hidden;
+    transition: transform 0.28s cubic-bezier(0.2, 0.8, 0.2, 1), opacity 0.28s ease;
+  }
+  .drum.dragging .slot { transition: none; }
+  .setter { gap: 12px; margin: 6px 0; }
+  .col { align-items: center; }
+  .sep { margin: 0 4px; }
+
+  /* Timer uses swipe only, so hide its arrows */
+  #timerView .step { display: none; }
+
+  /* Stable counting digits: fixed-width font so the line never shifts while it runs */
+  #swTime, #tmTime {
+    font-family: "Roboto Mono", ui-monospace, Menlo, monospace;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+    display: inline-block;
+    min-width: 6.4em;
+    text-align: center;
+    transform: translateZ(0);
+    backface-visibility: hidden;
+  }
+
+  #swTime { font-size: 11vw; display: flex; justify-content: center; align-items: flex-start; gap: 0.08em; }
+  #swTime .grp { display: flex; flex-direction: column; align-items: center; }
+  #swTime .grp > span { min-width: 1.25em; text-align: center; }
+  #swTime .swsep { line-height: 1; padding-top: 0; }
+  .unit {
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-top: 6px;
+    text-align: center;
+  }
+  #swTime .unit { font-size: 0.14em; margin-top: 0.4em; }
+  .setter .unit { white-space: nowrap; }
+
+  /* ---------- Motion polish ---------- */
+  .view:not([hidden]) { animation: viewIn 0.55s cubic-bezier(0.2, 0.8, 0.2, 1) both; }
+  @keyframes viewIn {
+    from { opacity: 0; transform: translateY(14px) scale(0.985); filter: blur(4px); }
+    to   { opacity: 1; transform: none; filter: blur(0); }
+  }
+  .tab svg { transition: transform 0.4s cubic-bezier(0.34, 1.56, 0.64, 1); }
+  .tab.active svg { transform: translateY(-1px) scale(1.1); }
+  .tab:active svg { transform: scale(0.88); }
+  .tab span { transition: opacity 0.3s ease; }
+  .tab:not(.active) span { opacity: 0.8; }
+  .sw-btn { transition: transform 0.15s ease, box-shadow 0.3s ease, border-color 0.3s ease; }
+  .sw-btn:hover { box-shadow: 0 8px 20px rgba(0, 0, 0, 0.6), inset 0 1px 0 rgba(255, 255, 255, 0.07); }
+  .battery { transition: opacity 0.4s ease; }
+  .sw-time { transition: color 0.6s ease, opacity 0.3s ease; }
+  .laps li { animation: viewIn 0.4s ease both; }
+
+  /* ---------- Landscape ---------- */
+  @media (orientation: landscape) and (max-height: 500px) {
+    :root { --th: min(40vh, 17vw); }
+    body { gap: 3vh; padding: 2vh 3vw; }
+  }
+
+  /* ---------- Reduced motion ---------- */
+  @media (prefers-reduced-motion: reduce) {
+    body::before, .tile, .colon, .info, .clock, .view, .laps li { animation: none !important; }
+    .flap { display: none !important; }
+  }
+</style>
+</head>
+<body>
+<div class="battery" id="battery" hidden>
+  <svg class="bat" viewBox="0 0 40 20" aria-hidden="true">
+    <rect class="shell" x="1" y="3" width="34" height="14" rx="3"/>
+    <rect class="cap" x="36" y="7" width="3" height="6" rx="1"/>
+    <rect class="level" id="batLevel" x="4" y="6" width="28" height="8" rx="1.5"/>
+    <path class="bolt" d="M21.5 3.5 L14 11.5 H19 L17.5 16.5 L25.5 8.5 H20.5 Z"/>
+  </svg>
+  <span id="batText">--%</span>
+</div>
+
+  <div id="clockView" class="view">
+  <div class="info">
+    <div class="day" id="day"></div>
+    <div class="date" id="date"></div>
+  </div>
+
+  <div class="clock" role="timer" aria-live="off" aria-label="Current time">
+    <div class="ampm" id="ampm"></div>
+    <div class="group" id="hours"></div>
+    <div class="colon" aria-hidden="true"><span></span><span></span></div>
+    <div class="mins">
+      <div class="group" id="minutes"></div>
+      <div class="secs-wrap"><div class="secs" id="secs"><span id="sec1">0</span><span id="sec2">0</span></div></div>
+    </div>
+  </div>
+
+  <div class="pill-row">
+    <button class="pill" id="toStop" type="button">Stopwatch</button>
+    <button class="pill" id="toTimer" type="button">Timer</button>
+  </div>
+  </div>
+
+  <section id="stopView" class="view" hidden>
+    <div class="sw-time" id="swTime">
+      <div class="grp"><span id="swH">00</span><div class="unit">Hours</div></div>
+      <span class="swsep">:</span>
+      <div class="grp"><span id="swM">00</span><div class="unit">Mins</div></div>
+      <span class="swsep">:</span>
+      <div class="grp"><span id="swS">00</span><div class="unit">Secs</div></div>
+      <span class="swsep">.</span>
+      <div class="grp"><span id="swC">00</span></div>
+    </div>
+    <div class="sw-controls">
+      <button class="sw-btn" id="swStart" type="button">Start</button>
+      <button class="sw-btn" id="swLap" type="button">Lap</button>
+      <button class="sw-btn" id="swReset" type="button">Reset</button>
+      <button class="pill" id="swBack" type="button">Clock</button>
+    </div>
+    <ol class="laps" id="laps"></ol>
+  </section>
+
+  <section id="timerView" class="view" hidden>
+    <div class="sw-time" id="tmTime">05:00</div>
+    <div class="setter">
+      <div class="col">
+        <button class="step" id="tmHourUp" type="button" aria-label="Hours up">&#9650;</button>
+        <div class="val" id="tmHourVal">00</div>
+        <button class="step" id="tmHourDn" type="button" aria-label="Hours down">&#9660;</button>
+        <div class="unit">Hours</div>
+      </div>
+      <div class="sep">:</div>
+      <div class="col">
+        <button class="step" id="tmMinUp" type="button" aria-label="Minutes up">&#9650;</button>
+        <div class="val" id="tmMinVal">05</div>
+        <button class="step" id="tmMinDn" type="button" aria-label="Minutes down">&#9660;</button>
+        <div class="unit">Mins</div>
+      </div>
+      <div class="sep">:</div>
+      <div class="col">
+        <button class="step" id="tmSecUp" type="button" aria-label="Seconds up">&#9650;</button>
+        <div class="val" id="tmSecVal">00</div>
+        <button class="step" id="tmSecDn" type="button" aria-label="Seconds down">&#9660;</button>
+        <div class="unit">Secs</div>
+      </div>
+    </div>
+    <p class="hint">Swipe a number up or down</p>
+    <div class="presets">
+      <button class="preset" data-min="1" type="button">1 min</button>
+      <button class="preset active" data-min="5" type="button">5 min</button>
+      <button class="preset" data-min="10" type="button">10 min</button>
+      <button class="preset" data-min="25" type="button">25 min</button>
+    </div>
+    <div class="sw-controls">
+      <button class="sw-btn" id="tmStart" type="button">Start</button>
+      <button class="sw-btn" id="tmReset" type="button">Reset</button>
+      <button class="pill" id="tmBack" type="button">Clock</button>
+    </div>
+  </section>
+
+
+<nav class="tabbar" aria-label="Sections">
+  <button class="tab active" data-view="clock" type="button">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
+    <span>Clock</span>
+  </button>
+  <button class="tab" data-view="stop" type="button">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="13" r="8"/><path d="M12 9v4M9.5 2.5h5M12 2.5V5"/></svg>
+    <span>Stopwatch</span>
+  </button>
+  <button class="tab" data-view="timer" type="button">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 2h12M6 22h12M7 2c0 5 5 6 5 10s-5 5-5 10M17 2c0 5-5 6-5 10s5 5 5 10"/></svg>
+    <span>Timer</span>
+  </button>
+</nav>
+
+<script>
+  // Tap anywhere to cycle the colour of the numerals.
+  const THEMES = ["#e8e8ea", "#ffb547", "#7cf2c4", "#8ec5ff", "#ff8fb1"];
+  let themeIdx = 0;
+  document.addEventListener("click", () => {
+    themeIdx = (themeIdx + 1) % THEMES.length;
+    document.documentElement.style.setProperty("--numeral", THEMES[themeIdx]);
+  });
+
+  const groups = {
+    hours: document.getElementById("hours"),
+    minutes: document.getElementById("minutes"),
+  };
+  const ampmEl = document.getElementById("ampm");
+  const dayEl = document.getElementById("day");
+  const dateEl = document.getElementById("date");
+
+  // Each tile has: static top, static bottom, and two flaps used during a flip.
+  function makeTile(index) {
+    const tile = document.createElement("div");
+    tile.className = "tile";
+    tile.style.setProperty("--i", index);
+    tile.innerHTML = `
+      <div class="half top"><span class="num"></span></div>
+      <div class="half bottom"><span class="num"></span></div>
+      <div class="flap flap-top"><span class="num"></span></div>
+      <div class="flap flap-bottom"><span class="num"></span></div>
+      <div class="hinge"></div>`;
+    return tile;
+  }
+
+  function buildGroup(name, count) {
+    const frag = document.createDocumentFragment();
+    for (let i = 0; i < count; i++) frag.appendChild(makeTile(i));
+    groups[name].replaceChildren(frag);
+  }
+  buildGroup("hours", 2);
+  buildGroup("minutes", 2);
+
+  function setTile(tile, value) {
+    const topStatic = tile.querySelector(".half.top .num");
+    const botStatic = tile.querySelector(".half.bottom .num");
+    const flapTop = tile.querySelector(".flap-top .num");
+    const flapBot = tile.querySelector(".flap-bottom .num");
+
+    const current = tile.dataset.value;
+    if (current === value) return;
+
+    // First render: no flip, just show the digit.
+    if (current === undefined) {
+      tile.dataset.value = value;
+      [topStatic, botStatic, flapTop, flapBot].forEach(n => n.textContent = value);
+      return;
+    }
+
+    tile.dataset.value = value;
+    topStatic.textContent = value;   // new top sits underneath
+    botStatic.textContent = current; // old bottom stays until the new one covers it
+    flapTop.textContent = current;   // old top folds down
+    flapBot.textContent = value;     // new bottom folds into place
+
+    tile.classList.remove("flipping");
+    void tile.offsetWidth;           // restart the animation
+    tile.classList.add("flipping");
+
+    clearTimeout(tile._done);
+    tile._done = setTimeout(() => {
+      botStatic.textContent = value;
+      tile.classList.remove("flipping");
+    }, 760);
+  }
+
+  // Fade-and-slide text only when it actually changes.
+  function swapText(el, text) {
+    if (el.textContent === text) return;
+    el.textContent = text;
+    el.classList.remove("swap");
+    void el.offsetWidth;
+    el.classList.add("swap");
+  }
+
+  const pad = n => String(n).padStart(2, "0");
+
+  function update() {
+    const now = new Date();
+    let h = now.getHours();
+    const m = now.getMinutes();
+    const suffix = h >= 12 ? "PM" : "AM";
+    h = h % 12;
+    if (h === 0) h = 12;
+
+    const hourTiles = groups.hours.querySelectorAll(".tile");
+    const minTiles = groups.minutes.querySelectorAll(".tile");
+    onMinute(m);
+    const hStr = pad(h), mStr = pad(m);
+
+    setTile(hourTiles[0], hStr[0]);
+    setTile(hourTiles[1], hStr[1]);
+    setTile(minTiles[0], mStr[0]);
+    setTile(minTiles[1], mStr[1]);
+
+    const sStr = pad(now.getSeconds());
+    document.getElementById("sec1").textContent = sStr[0];
+    document.getElementById("sec2").textContent = sStr[1];
+
+    swapText(ampmEl, suffix);
+    swapText(dayEl, now.toLocaleDateString(undefined, { weekday: "long" }));
+    swapText(dateEl, now.toLocaleDateString(undefined, {
+      day: "numeric", month: "long", year: "numeric",
+    }));
+  }
+
+  // Keep the screen awake while the clock is open
+  let wakeLock = null;
+  async function keepAwake() {
+    try {
+      if ("wakeLock" in navigator && document.visibilityState === "visible" && !wakeLock) {
+        wakeLock = await navigator.wakeLock.request("screen");
+        wakeLock.addEventListener("release", () => { wakeLock = null; });
+      }
+    } catch (e) { /* not supported or denied */ }
+  }
+  keepAwake();
+  document.addEventListener("visibilitychange", keepAwake);
+  document.addEventListener("pointerdown", keepAwake, { passive: true });
+
+  // Short vibration and a small pulse each time the minute changes
+  let lastMinute = null;
+  const clockEl = document.querySelector(".clock");
+  function onMinute(m) {
+    if (lastMinute !== null && m !== lastMinute) {
+      if (navigator.vibrate) navigator.vibrate(12);
+      clockEl.classList.remove("bump");
+      void clockEl.offsetWidth;
+      clockEl.classList.add("bump");
+    }
+    lastMinute = m;
+  }
+
+  // Stopwatch
+  const clockView = document.getElementById("clockView");
+  const stopView = document.getElementById("stopView");
+  const swTime = document.getElementById("swTime");
+  const swStart = document.getElementById("swStart");
+  let swRunning = false, swElapsed = 0, swStarted = 0, swRaf = null;
+
+  function fmtStopwatch(ms) {
+    const cs = Math.floor(ms / 10) % 100;
+    const sec = Math.floor(ms / 1000) % 60;
+    const min = Math.floor(ms / 60000) % 60;
+    const hr = Math.floor(ms / 3600000);
+    const core = pad(min) + ":" + pad(sec) + "." + pad(cs);
+    return pad(hr) + ":" + core;
+  }
+
+  function swShow(ms) {
+    const parts = fmtStopwatch(ms).split(/[:.]/);
+    ["swH", "swM", "swS", "swC"].forEach((id, i) => {
+      const el = document.getElementById(id);
+      if (el.textContent !== parts[i]) el.textContent = parts[i];
+    });
+  }
+
+  function swTick() {
+    const ms = swElapsed + (swRunning ? performance.now() - swStarted : 0);
+    swShow(ms);
+    if (swRunning) swRaf = requestAnimationFrame(swTick);
+  }
+
+  swStart.addEventListener("click", (e) => {
+    e.stopPropagation();
+    if (swRunning) {
+      swElapsed += performance.now() - swStarted;
+      swRunning = false;
+      cancelAnimationFrame(swRaf);
+      swStart.textContent = "Start";
+    } else {
+      swStarted = performance.now();
+      swRunning = true;
+      swStart.textContent = "Stop";
+      swTick();
+    }
+  });
+
+  document.getElementById("swReset").addEventListener("click", (e) => {
+    e.stopPropagation();
+    swRunning = false;
+    cancelAnimationFrame(swRaf);
+    swElapsed = 0;
+    swShow(0);
+    swStart.textContent = "Start";
+    laps.replaceChildren();
+    lapCount = 0;
+  });
+
+  const swLap = document.getElementById("swLap");
+  const laps = document.getElementById("laps");
+  let lapCount = 0;
+  swLap.addEventListener("click", (e) => {
+    e.stopPropagation();
+    const ms = swElapsed + (swRunning ? performance.now() - swStarted : 0);
+    if (ms <= 0) return;
+    lapCount++;
+    const li = document.createElement("li");
+    li.innerHTML = "<span>Lap " + lapCount + "</span><span>" + fmtStopwatch(ms) + "</span>";
+    laps.prepend(li);
+  });
+
+  function showStopwatch(show) {
+    clockView.hidden = show;
+    stopView.hidden = !show;
+  }
+  document.getElementById("toStop").addEventListener("click", (e) => { e.stopPropagation(); showStopwatch(true); });
+  document.getElementById("swBack").addEventListener("click", (e) => { e.stopPropagation(); showStopwatch(false); });
+
+  // Timer
+  const timerView = document.getElementById("timerView");
+  const tmTime = document.getElementById("tmTime");
+  const tmStart = document.getElementById("tmStart");
+  let tmDuration = 5 * 60000, tmRemaining = tmDuration, tmRunning = false, tmEnd = 0, tmInterval = null;
+
+  function fmtTimer(ms) {
+    const total = Math.ceil(ms / 1000);
+    const h = Math.floor(total / 3600);
+    const m = Math.floor((total % 3600) / 60);
+    const sec = total % 60;
+    return pad(h) + ":" + pad(m) + ":" + pad(sec);
+  }
+
+  function tmRender() { tmTime.textContent = fmtTimer(tmRemaining); tmSyncSetter(); }
+
+  function tmPause() {
+    tmRemaining = Math.max(0, tmEnd - Date.now());
+    tmRunning = false;
+    clearInterval(tmInterval);
+    tmStart.textContent = "Start";
+    tmRender();
+  }
+
+  function tmFinish() {
+    tmPause();
+    tmRemaining = 0;
+    tmTime.textContent = "Done";
+    tmTime.classList.add("done");
+    if (navigator.vibrate) navigator.vibrate([400, 200, 400, 200, 400]);
+  }
+
+  tmStart.addEventListener("click", (e) => {
+    e.stopPropagation();
+    if (tmRunning) { tmPause(); return; }
+    if (tmRemaining <= 0) {
+      if (tmDuration <= 0) return;
+      tmRemaining = tmDuration;
+    }
+    tmTime.classList.remove("done");
+    tmEnd = Date.now() + tmRemaining;
+    tmRunning = true;
+    tmStart.textContent = "Pause";
+    tmRender();
+    tmInterval = setInterval(() => {
+      tmRemaining = Math.max(0, tmEnd - Date.now());
+      if (tmRemaining <= 0) tmFinish();
+      else tmRender();
+    }, 200);
+  });
+
+  document.getElementById("tmReset").addEventListener("click", (e) => {
+    e.stopPropagation();
+    tmPause();
+    tmSetDuration(0);
+  });
+
+  document.querySelectorAll(".preset[data-min]").forEach((btn) => {
+    btn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      tmPause();
+      tmDuration = Number(btn.dataset.min) * 60000;
+      tmRemaining = tmDuration;
+      tmTime.classList.remove("done");
+      document.querySelectorAll(".preset[data-min]").forEach((b) => b.classList.toggle("active", b === btn));
+      tmRender();
+    });
+  });
+
+  document.getElementById("toTimer").addEventListener("click", (e) => {
+    e.stopPropagation();
+    clockView.hidden = true;
+    timerView.hidden = false;
+  });
+  document.getElementById("tmBack").addEventListener("click", (e) => {
+    e.stopPropagation();
+    timerView.hidden = true;
+    clockView.hidden = false;
+  });
+
+  tmRender();
+
+  // Timer setter: change minutes and seconds
+  function tmSetDuration(totalSec) {
+    if (tmRunning) return;
+    totalSec = Math.max(0, Math.min(99 * 3600 + 59 * 60 + 59, totalSec));
+    tmDuration = totalSec * 1000;
+    tmRemaining = tmDuration;
+    tmTime.classList.remove("done");
+    document.querySelectorAll(".preset[data-min]").forEach((b) => b.classList.remove("active"));
+    tmRender();
+  }
+  function tmParts() {
+    const total = Math.round(tmDuration / 1000);
+    return { h: Math.floor(total / 3600), m: Math.floor((total % 3600) / 60), s: total % 60 };
+  }
+  function tmTotal() { return Math.round(tmDuration / 1000); }
+  function tmSyncSetter() {
+    const minUp = document.getElementById("tmMinUp");
+    if (!minUp) return;
+    const idle = !tmRunning && tmRemaining === tmDuration && !tmTime.classList.contains("done");
+    document.querySelector("#timerView .setter").hidden = !idle;
+    tmTime.hidden = idle;
+    const { h, m, s } = tmParts();
+    document.getElementById("tmHourVal").textContent = pad(h);
+    document.getElementById("tmMinVal").textContent = pad(m);
+    document.getElementById("tmSecVal").textContent = pad(s);
+    ["tmHourUp", "tmHourDn", "tmMinUp", "tmMinDn", "tmSecUp", "tmSecDn"].forEach((id) => {
+      document.getElementById(id).disabled = tmRunning;
+    });
+  }
+  document.getElementById("tmMinUp").addEventListener("click", (e) => {
+    e.stopPropagation(); tmSetDuration(tmTotal() + 60);
+  });
+  document.getElementById("tmMinDn").addEventListener("click", (e) => {
+    e.stopPropagation(); tmSetDuration(tmTotal() - 60);
+  });
+  document.getElementById("tmSecUp").addEventListener("click", (e) => {
+    e.stopPropagation(); tmSetDuration(tmTotal() + 5);
+  });
+  document.getElementById("tmSecDn").addEventListener("click", (e) => {
+    e.stopPropagation(); tmSetDuration(tmTotal() - 5);
+  });
+  document.getElementById("tmHourUp").addEventListener("click", (e) => {
+    e.stopPropagation(); tmSetDuration(tmTotal() + 3600);
+  });
+  document.getElementById("tmHourDn").addEventListener("click", (e) => {
+    e.stopPropagation(); tmSetDuration(tmTotal() - 3600);
+  });
+  tmSyncSetter();
+
+  // 3D drum: the numbers sit on a cylinder that turns as you swipe
+  const DRUM_STEP = 36;                                              // degrees between numbers
+  const DRUM_R = 0.5 / Math.tan((DRUM_STEP / 2) * Math.PI / 180);    // cylinder radius, in em
+  function paintDrum(drum, id, d) {
+    const cur = Number(document.getElementById(id).textContent) || 0;
+    const max = id === "tmHourVal" ? 99 : 59;
+    drum.querySelectorAll(".slot").forEach((sl) => {
+      const k = Number(sl.dataset.k);
+      const n = cur + k;
+      const pos = k - d;
+      const dist = Math.abs(pos);
+      sl.textContent = n < 0 || n > max ? "" : pad(n);
+      sl.style.transform = `translateY(${pos}em) rotateX(${-pos * 18}deg) scale(${(1 - dist * 0.12).toFixed(3)})`;
+      sl.style.opacity = dist > 1.5 ? "0" : Math.max(0, 1 - dist * 0.65).toFixed(2);
+    });
+  }
+  function attachDrum(id, upId, dnId) {
+    const holder = document.getElementById(id);
+    holder.style.display = "none";                 // keeps the value text that the timer reads
+    const drum = document.createElement("div");
+    drum.className = "drum";
+    for (let k = -2; k <= 2; k++) {
+      const sl = document.createElement("span");
+      sl.className = "slot";
+      sl.dataset.k = k;
+      drum.appendChild(sl);
+    }
+    holder.insertAdjacentElement("afterend", drum);
+
+    const up = () => document.getElementById(upId).click();
+    const dn = () => document.getElementById(dnId).click();
+    let startY = null, applied = 0;
+
+    drum.addEventListener("pointerdown", (e) => {
+      e.stopPropagation();
+      startY = e.clientY;
+      applied = 0;
+      drum.setPointerCapture(e.pointerId);
+      drum.classList.add("dragging");
+    });
+    drum.addEventListener("pointermove", (e) => {
+      if (startY === null) return;
+      const raw = (startY - e.clientY) / 24;       // 24px of movement per number
+      const steps = Math.trunc(raw);
+      while (steps > applied) { applied++; up(); }
+      while (steps < applied) { applied--; dn(); }
+      paintDrum(drum, id, raw - applied);
+    });
+    const release = () => {
+      if (startY === null) return;
+      startY = null;
+      drum.classList.remove("dragging");
+      paintDrum(drum, id, 0);                      // the drum settles into place
+    };
+    drum.addEventListener("pointerup", release);
+    drum.addEventListener("pointercancel", release);
+    drum.addEventListener("wheel", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      (e.deltaY < 0 ? up : dn)();
+      paintDrum(drum, id, 0);
+    }, { passive: false });
+
+    paintDrum(drum, id, 0);
+    setInterval(() => { if (startY === null) paintDrum(drum, id, 0); }, 250);
+  }
+
+  // Swipe (or scroll) on a number to change it. Each 24px of movement is one step.
+  function attachSwipe(valEl, upId, dnId) {
+    const up = () => document.getElementById(upId);
+    const dn = () => document.getElementById(dnId);
+    let startY = null, applied = 0;
+
+    valEl.addEventListener("pointerdown", (e) => {
+      e.stopPropagation();
+      startY = e.clientY;
+      applied = 0;
+      valEl.setPointerCapture(e.pointerId);
+      valEl.classList.add("dragging");
+    });
+    valEl.addEventListener("pointermove", (e) => {
+      if (startY === null) return;
+      const steps = Math.trunc((startY - e.clientY) / 24);
+      while (steps > applied) { applied++; up().click(); }
+      while (steps < applied) { applied--; dn().click(); }
+    });
+    const end = () => {
+      startY = null;
+      valEl.classList.remove("dragging");
+    };
+    valEl.addEventListener("pointerup", end);
+    valEl.addEventListener("pointercancel", end);
+
+    valEl.addEventListener("wheel", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      (e.deltaY < 0 ? up() : dn()).click();
+    }, { passive: false });
+  }
+  attachDrum("tmMinVal", "tmMinUp", "tmMinDn");
+  attachDrum("tmHourVal", "tmHourUp", "tmHourDn");
+  attachDrum("tmSecVal", "tmSecUp", "tmSecDn");
+
+  // Battery (where the browser supports it)
+  const batEl = document.getElementById("battery");
+  async function initBattery() {
+    if (!navigator.getBattery) return;
+    try {
+      const bat = await navigator.getBattery();
+      const render = () => {
+        const pct = Math.round(bat.level * 100);
+        document.getElementById("batLevel").setAttribute("width", String(Math.max(2, 28 * bat.level)));
+        document.getElementById("batText").textContent = pct + "%";
+        batEl.classList.toggle("charging", bat.charging);
+        batEl.classList.toggle("low", pct <= 20 && !bat.charging);
+        batEl.hidden = false;
+      };
+      render();
+      bat.addEventListener("levelchange", render);
+      bat.addEventListener("chargingchange", render);
+    } catch (e) { /* not available */ }
+  }
+  initBattery();
+
+  // The tab bar fades after 5 seconds without touching; any touch brings it back
+  let idleTimer = null;
+  function wakeBar() {
+    document.body.classList.remove("idle");
+    clearTimeout(idleTimer);
+    idleTimer = setTimeout(() => document.body.classList.add("idle"), 5000);
+  }
+  ["pointerdown", "pointermove", "keydown", "wheel"].forEach((ev) =>
+    document.addEventListener(ev, wakeBar, { capture: true, passive: true })
+  );
+  wakeBar();
+
+  // Bottom tab bar switches between sections
+  const tabs = document.querySelectorAll(".tab");
+  function showView(name) {
+    clockView.hidden = name !== "clock";
+    stopView.hidden = name !== "stop";
+    timerView.hidden = name !== "timer";
+    tabs.forEach((t) => t.classList.toggle("active", t.dataset.view === name));
+  }
+  tabs.forEach((t) => t.addEventListener("click", (e) => {
+    e.stopPropagation();
+    showView(t.dataset.view);
+  }));
+  showView("clock");
+
+  update();
+  setInterval(update, 250);
+
+  // Offline support
+  if ("serviceWorker" in navigator) {
+    window.addEventListener("load", () => {
+      navigator.serviceWorker.register("sw.js").catch(() => {});
+    });
+  }
+</script>
+</body>
+</html>
